@@ -18,6 +18,8 @@ type RecordItem = {
   completed: boolean;
   sentences: string[];
   checkIn: "done" | "partial" | "missed";
+  grammarScore?: number;
+  grammarTotal?: number;
 };
 
 type AppData = {
@@ -34,6 +36,9 @@ type DailyDraft = {
   answers: string[];
   sentences: string[];
   quizFeedback?: QuizFeedback | null;
+  grammarIndex?: number;
+  grammarAnswers?: string[];
+  grammarFeedback?: GrammarFeedback | null;
 };
 
 type QuizFeedback = {
@@ -41,6 +46,55 @@ type QuizFeedback = {
   userAnswer: string;
   correctAnswer: string;
 };
+
+type GrammarItem = {
+  pattern: string;
+  prompt: string;
+  options: string[];
+  answer: string;
+  explanation: string;
+  translation: string;
+};
+
+type GrammarFeedback = {
+  correct: boolean;
+  userAnswer: string;
+};
+
+const GRAMMAR_QUESTIONS: GrammarItem[] = [
+  {
+    pattern: "～ので（因為……）",
+    prompt: "警察が（　）ので、安心です。",
+    options: ["いる", "ある", "いて", "いった"],
+    answer: "いる",
+    explanation: "人或動物的存在使用「いる」。普通形接「ので」，因此是「いるので」。",
+    translation: "因為有警察，所以很安心。",
+  },
+  {
+    pattern: "～なければなりません（必須……）",
+    prompt: "明日は試験ですから、勉強し（　）。",
+    options: ["てもいいです", "なければなりません", "ないでください", "たことがあります"],
+    answer: "なければなりません",
+    explanation: "「動詞ない形去掉い＋ければなりません」表示必須做某事。",
+    translation: "因為明天要考試，所以必須讀書。",
+  },
+  {
+    pattern: "～たことがあります（曾經……）",
+    prompt: "私は京都へ行っ（　）。",
+    options: ["たことがあります", "てもいいです", "ながらです", "なければなりません"],
+    answer: "たことがあります",
+    explanation: "「動詞た形＋ことがあります」表示曾經有過某種經驗。",
+    translation: "我曾經去過京都。",
+  },
+  {
+    pattern: "～ながら（一邊……一邊……）",
+    prompt: "音楽を聞き（　）、宿題をします。",
+    options: ["ので", "ながら", "たり", "まで"],
+    answer: "ながら",
+    explanation: "「動詞ます形去掉ます＋ながら」表示同時進行兩個動作。",
+    translation: "我一邊聽音樂，一邊寫作業。",
+  },
+];
 
 type QuizItem = {
   word: Word;
@@ -182,6 +236,9 @@ export default function Home() {
   const [reviewingSentences, setReviewingSentences] = useState(false);
   const [wordSearch, setWordSearch] = useState("");
   const [quizFeedback, setQuizFeedback] = useState<QuizFeedback | null>(null);
+  const [grammarIndex, setGrammarIndex] = useState(0);
+  const [grammarAnswers, setGrammarAnswers] = useState<string[]>([]);
+  const [grammarFeedback, setGrammarFeedback] = useState<GrammarFeedback | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("kotoba-n4-data");
@@ -195,14 +252,17 @@ export default function Home() {
     if (completedToday) {
       setCheckIn(completedToday.checkIn);
       setSentences(completedToday.sentences.length ? completedToday.sentences : ["", "", ""]);
-      setStep(4);
+      setStep(5);
     } else if (draft?.date === today) {
-      setStep(draft.step);
+      setStep(draft.grammarAnswers ? draft.step : draft.step >= 2 ? draft.step + 1 : draft.step);
       setCheckIn(draft.checkIn);
       setQuizIndex(draft.quizIndex);
       setAnswers(draft.answers);
       setSentences(draft.sentences);
       setQuizFeedback(draft.quizFeedback ?? null);
+      setGrammarIndex(draft.grammarIndex ?? 0);
+      setGrammarAnswers(draft.grammarAnswers ?? []);
+      setGrammarFeedback(draft.grammarFeedback ?? null);
     }
     setReady(true);
   }, []);
@@ -213,7 +273,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready || !data) return;
-    if (step === 4) {
+    if (step === 5) {
       window.localStorage.removeItem("kotoba-n4-daily-draft");
       return;
     }
@@ -225,9 +285,12 @@ export default function Home() {
       answers,
       sentences,
       quizFeedback,
+      grammarIndex,
+      grammarAnswers,
+      grammarFeedback,
     };
     window.localStorage.setItem("kotoba-n4-daily-draft", JSON.stringify(draft));
-  }, [ready, data, step, checkIn, quizIndex, answers, sentences, quizFeedback]);
+  }, [ready, data, step, checkIn, quizIndex, answers, sentences, quizFeedback, grammarIndex, grammarAnswers, grammarFeedback]);
 
   const isWeekly = data ? (data.records.length + 1) % 7 === 0 : false;
   const lastThree = data?.records.slice(-3) ?? [];
@@ -248,6 +311,12 @@ export default function Home() {
     const total = isWeekly ? 20 : 5;
     return Array.from({ length: total }, (_, index) => questionFor(weighted[index % weighted.length], index));
   }, [data, isWeekly]);
+
+  const grammarQuiz = useMemo(() => {
+    const day = data?.records.length ?? 0;
+    const start = (day * 2) % GRAMMAR_QUESTIONS.length;
+    return [GRAMMAR_QUESTIONS[start], GRAMMAR_QUESTIONS[(start + 1) % GRAMMAR_QUESTIONS.length]];
+  }, [data?.records.length]);
 
   if (!data) return <main className="loading">正在整理今天的學習內容…</main>;
 
@@ -271,7 +340,20 @@ export default function Home() {
   function continueQuiz() {
     setQuizFeedback(null);
     if (quizIndex < quiz.length - 1) setQuizIndex((index) => index + 1);
-    else setStep(isWeekly ? 3 : 2);
+    else setStep(2);
+  }
+
+  function submitGrammarAnswer(value: string) {
+    if (grammarFeedback) return;
+    const question = grammarQuiz[grammarIndex];
+    setGrammarAnswers((items) => [...items, value]);
+    setGrammarFeedback({ correct: value === question.answer, userAnswer: value });
+  }
+
+  function continueGrammar() {
+    setGrammarFeedback(null);
+    if (grammarIndex < grammarQuiz.length - 1) setGrammarIndex((index) => index + 1);
+    else setStep(3);
   }
 
   function finishDay() {
@@ -284,9 +366,10 @@ export default function Home() {
     });
     const learnedIds = [...new Set([...data!.learnedIds, ...todayNewWords.map((word) => word.id)])];
     const today = new Date().toISOString().slice(0, 10);
-    const record: RecordItem = { date: today, score: correctCount, total: quiz.length, completed: true, sentences, checkIn: checkIn ?? "partial" };
+    const grammarScore = grammarAnswers.reduce((score, item, index) => score + (item === grammarQuiz[index].answer ? 1 : 0), 0);
+    const record: RecordItem = { date: today, score: correctCount, total: quiz.length, completed: true, sentences, checkIn: checkIn ?? "partial", grammarScore, grammarTotal: grammarQuiz.length };
     setData({ learnedIds, mistakes, records: [...data!.records.filter((item) => item.date !== today), record] });
-    setStep(4);
+    setStep(5);
   }
 
   function resetDemo() {
@@ -296,6 +379,9 @@ export default function Home() {
     setAnswers([]);
     setQuizIndex(0);
     setCheckIn(null);
+    setGrammarIndex(0);
+    setGrammarAnswers([]);
+    setGrammarFeedback(null);
   }
 
   const todayLabel = new Intl.DateTimeFormat("zh-TW", { month: "long", day: "numeric", weekday: "short" }).format(new Date());
@@ -311,6 +397,9 @@ export default function Home() {
   const completedToday = data.records.find((record) => record.date === today && record.completed);
   const displayedScore = completedToday?.score ?? correctCount;
   const displayedTotal = completedToday?.total ?? quiz.length;
+  const currentGrammarScore = grammarAnswers.reduce((score, item, index) => score + (item === grammarQuiz[index].answer ? 1 : 0), 0);
+  const displayedGrammarScore = completedToday?.grammarScore ?? currentGrammarScore;
+  const displayedGrammarTotal = completedToday?.grammarTotal ?? grammarQuiz.length;
   const sentenceFeedback = sentences.map((sentence, index) =>
     reviewSentence(sentence, isWeekly ? undefined : todayNewWords[index])
   );
@@ -338,13 +427,13 @@ export default function Home() {
             <div>
               <p className="eyebrow">{todayLabel} · Day {data.records.length + 1}</p>
               <h1>{isWeekly ? "本週的成果，今天收進口袋。" : "每天一點點，日文就會留下來。"}</h1>
-              <p>{isWeekly ? "今天不增加新詞，用 20 題把這週的記憶重新整理。" : `今天約 15–20 分鐘：回報、${quiz.length} 題複習、${todayNewWords.length} 個單字、3 句造句。`}</p>
+              <p>{isWeekly ? "今天不增加新詞，用 20 題和 2 題文法把這週的記憶重新整理。" : `今天約 15–20 分鐘：回報、${quiz.length} 題複習、2 題文法、${todayNewWords.length} 個單字、3 句造句。`}</p>
             </div>
-            <div className="day-ring"><strong>{Math.min(100, Math.round((step / 4) * 100))}%</strong><span>今日進度</span></div>
+            <div className="day-ring"><strong>{Math.min(100, Math.round((step / 5) * 100))}%</strong><span>今日進度</span></div>
           </div>
 
           <div className="stepper">
-            {["昨日回報", isWeekly ? "週測驗" : "複習測驗", isWeekly ? "整理錯詞" : "今日單字", "造句", "完成"].map((label, index) => (
+            {["昨日回報", isWeekly ? "週測驗" : "複習測驗", "文法練習", isWeekly ? "整理錯詞" : "今日單字", "造句", "完成"].map((label, index) => (
               <div className={index <= step ? "done" : ""} key={label}><span>{index < step ? "✓" : index + 1}</span><small>{label}</small></div>
             ))}
           </div>
@@ -402,9 +491,37 @@ export default function Home() {
             </article>
           )}
 
-          {step === 2 && !isWeekly && (
+          {step === 2 && grammarQuiz[grammarIndex] && (
+            <article className="card quiz-card grammar-card">
+              <div className="quiz-meta"><span>文法練習 · {grammarQuiz[grammarIndex].pattern}</span><strong>{grammarIndex + 1} / 2</strong></div>
+              <div className="progress-track"><i style={{ width: `${((grammarIndex + 1) / 2) * 100}%` }} /></div>
+              <h2>{grammarQuiz[grammarIndex].prompt}</h2>
+              {!grammarFeedback && (
+                <div className="option-list">
+                  {grammarQuiz[grammarIndex].options.map((option) => (
+                    <button key={option} onClick={() => submitGrammarAnswer(option)}>{option}</button>
+                  ))}
+                </div>
+              )}
+              {grammarFeedback && (
+                <div className={`quiz-feedback ${grammarFeedback.correct ? "correct" : "incorrect"}`}>
+                  <div className="quiz-feedback-title">
+                    <span>{grammarFeedback.correct ? "✓" : "✕"}</span>
+                    <strong>{grammarFeedback.correct ? "答對了！" : "再看一次這個句型"}</strong>
+                  </div>
+                  {!grammarFeedback.correct && <p>你的答案：<b>{grammarFeedback.userAnswer}</b></p>}
+                  <p>正確答案：<b>{grammarQuiz[grammarIndex].answer}</b></p>
+                  <p className="grammar-explanation">{grammarQuiz[grammarIndex].explanation}</p>
+                  <small>{grammarQuiz[grammarIndex].translation}</small>
+                  <button className="primary" onClick={continueGrammar}>{grammarIndex < 1 ? "下一題 →" : "繼續今日學習 →"}</button>
+                </div>
+              )}
+            </article>
+          )}
+
+          {step === 3 && !isWeekly && (
             <section>
-              <div className="section-heading"><div><p className="card-kicker">STEP 3 · 今日單字</p><h2>今天的 {todayNewWords.length} 個新詞</h2></div><span className="adaptive">依近期正確率 {Math.round(recentAccuracy * 100)}% 調整</span></div>
+              <div className="section-heading"><div><p className="card-kicker">STEP 4 · 今日單字</p><h2>今天的 {todayNewWords.length} 個新詞</h2></div><span className="adaptive">依近期正確率 {Math.round(recentAccuracy * 100)}% 調整</span></div>
               <div className="word-grid">
                 {todayNewWords.map((word, index) => (
                   <article className="word-card" key={word.id}>
@@ -415,21 +532,21 @@ export default function Home() {
                   </article>
                 ))}
               </div>
-              <button className="primary wide" onClick={() => setStep(3)}>我讀完了，開始造句 →</button>
+              <button className="primary wide" onClick={() => setStep(4)}>我讀完了，開始造句 →</button>
             </section>
           )}
 
-          {step === 2 && isWeekly && (
+          {step === 3 && isWeekly && (
             <article className="card focus-card">
               <p className="card-kicker">本週測驗結果</p><h2>{correctCount} / {quiz.length} 題答對</h2>
               <p className="muted">今天不增加新詞。先把錯題收進易錯詞，下週會優先再考。</p>
-              <button className="primary" onClick={() => setStep(3)}>整理並完成本週複習 →</button>
+              <button className="primary" onClick={() => setStep(4)}>整理並完成本週複習 →</button>
             </article>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <article className="card sentence-card">
-              <p className="card-kicker">STEP 4 · 造句練習</p>
+              <p className="card-kicker">STEP 5 · 造句練習</p>
               <h2>{isWeekly ? "寫下這週最想記住的 3 句" : "用今天的詞，寫 3 句自己的日文"}</h2>
               <p className="muted">{isWeekly ? "可以使用本週任何單字。" : `建議使用：${todayNewWords.slice(0, 3).map((word) => `${word.kanji}（${word.kana}）`).join("、")}`}</p>
               {sentences.map((sentence, index) => (
@@ -466,11 +583,12 @@ export default function Home() {
             </article>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <article className="card complete-card">
               <span className="celebrate">よくできました！</span>
               <h2>今天完成了。</h2>
               <div className="result-number"><strong>{displayedScore}/{displayedTotal}</strong><span>測驗成績</span></div>
+              <p><strong>文法 {displayedGrammarScore}/{displayedGrammarTotal}</strong> 題答對</p>
               <p>今天的紀錄已保存在這台裝置。再次開啟網站時，會直接回到這個完成畫面。</p>
               <button className="secondary" onClick={() => setTab("progress")}>查看我的進度</button>
             </article>
@@ -490,7 +608,7 @@ export default function Home() {
             <h2>最近紀錄</h2>
             <div className="history-list">
               {data.records.slice().reverse().map((record, index) => (
-                <div key={`${record.date}-${index}`}><span className="history-dot">✓</span><div><strong>{record.date}</strong><small>{record.total === 20 ? "週複習" : "每日學習"} · 造句 {record.sentences.filter(Boolean).length} 句</small></div><b>{record.score}/{record.total}</b></div>
+                <div key={`${record.date}-${index}`}><span className="history-dot">✓</span><div><strong>{record.date}</strong><small>{record.total === 20 ? "週複習" : "每日學習"} · 文法 {record.grammarScore ?? "—"}/{record.grammarTotal ?? 2} · 造句 {record.sentences.filter(Boolean).length} 句</small></div><b>{record.score}/{record.total}</b></div>
               ))}
             </div>
           </article>
