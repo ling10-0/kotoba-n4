@@ -100,6 +100,15 @@ button { color: inherit; }
 .option-list { display: grid; gap: 10px; margin-top: 24px; }
 .option-list button { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: white; cursor: pointer; font-weight: 800; }
 .option-list button:hover { border-color: var(--green); background: #edf4ec; }
+.quiz-feedback { margin-top: 24px; padding: 20px; border-radius: 16px; border: 1px solid var(--line); }
+.quiz-feedback.correct { background: #edf6ee; border-color: #b8d5bd; }
+.quiz-feedback.incorrect { background: #fff4ec; border-color: #edc4ac; }
+.quiz-feedback-title { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.quiz-feedback-title span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--green); font-weight: 900; }
+.quiz-feedback.incorrect .quiz-feedback-title span { background: var(--orange); }
+.quiz-feedback p { margin: 7px 0; }
+.quiz-feedback small { display: block; color: var(--muted); margin-top: 10px; }
+.quiz-feedback .primary { width: 100%; margin-top: 18px; }
 .text-button, .danger-link { display: block; border: 0; background: transparent; color: var(--green); cursor: pointer; margin: 20px auto 0; font-size: 13px; }
 .danger-link { color: #a64d3d; }
 .tip { margin-top: 12px; padding: 14px; border-radius: 12px; color: #6e5419; background: #fff6da; line-height: 1.6; font-size: 13px; }
@@ -119,6 +128,27 @@ button { color: inherit; }
 .sentence-input { display: flex; gap: 12px; align-items: center; margin: 12px 0; }
 .sentence-input span { flex: 0 0 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--orange); font-weight: 800; }
 .sentence-card .primary { width: 100%; margin-top: 20px; }
+.correction-panel { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+.correction-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.correction-heading strong { font: 700 22px "Yu Mincho", serif; }
+.correction-heading span { color: var(--muted); font-size: 12px; }
+.correction { margin: 10px 0; padding: 18px; border: 1px solid var(--line); border-radius: 15px; background: white; }
+.correction.good { border-left: 5px solid var(--green); }
+.correction.review { border-left: 5px solid var(--orange); background: #fffaf3; }
+.correction-title { display: flex; align-items: center; gap: 9px; }
+.correction-title > span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--green); font-weight: 900; }
+.correction.review .correction-title > span { background: var(--orange); }
+.original-sentence { margin: 12px 0 8px; font-weight: 800; }
+.correction small { display: block; color: var(--muted); line-height: 1.6; }
+.correction button { margin-top: 12px; padding: 9px 12px; border: 0; border-radius: 9px; color: var(--green); background: var(--green-soft); cursor: pointer; font-size: 13px; font-weight: 800; text-align: left; }
+.correction-note { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.correction-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+.correction-actions .primary { margin-top: 0; }
+.word-search { display: block; max-width: 540px; margin-bottom: 24px; }
+.word-search span { display: block; color: var(--muted); margin-bottom: 7px; font-size: 13px; font-weight: 700; }
+.word-search input { width: 100%; padding: 14px 16px; border: 1px solid #cfd4cf; border-radius: 12px; background: white; outline: none; }
+.word-search input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(47,104,79,.1); }
+.empty-state { padding: 40px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 18px; }
 .complete-card { max-width: 650px; margin: 0 auto; text-align: center; }
 .celebrate { display: inline-block; color: var(--orange); font: 700 17px "Yu Mincho", serif; margin-bottom: 12px; }
 .result-number { margin: 25px auto; width: 145px; aspect-ratio: 1; display: grid; place-content: center; border-radius: 50%; color: white; background: var(--green); }
@@ -152,7 +182,7 @@ footer { padding: 22px; text-align: center; color: #8b938e; border-top: 1px soli
   .topbar { height: 68px; padding: 0 16px; }
   .brand small { display: none; }
   .tabs { padding: 0 16px; justify-content: space-between; gap: 8px; }
-  .tabs button { font-size: 13px; }
+  .tabs button { font-size: 12px; }
   .page { padding: 24px 16px 60px; }
   .hero { padding: 27px 24px; border-radius: 22px; }
   .hero h1 { font-size: 29px; }
@@ -165,6 +195,9 @@ footer { padding: 22px; text-align: center; color: #8b938e; border-top: 1px soli
   .card { padding: 25px 20px; }
   .section-heading { display: block; }
   .adaptive { display: inline-block; margin-top: 12px; }
+  .correction-heading { display: block; }
+  .correction-heading span { display: block; margin-top: 4px; }
+  .correction-actions { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -26,12 +26,35 @@ type AppData = {
   mistakes: Record<string, number>;
 };
 
+type DailyDraft = {
+  date: string;
+  step: number;
+  checkIn: RecordItem["checkIn"] | null;
+  quizIndex: number;
+  answers: string[];
+  sentences: string[];
+  quizFeedback?: QuizFeedback | null;
+};
+
+type QuizFeedback = {
+  correct: boolean;
+  userAnswer: string;
+  correctAnswer: string;
+};
+
 type QuizItem = {
   word: Word;
   prompt: string;
   answer: string;
   kind: "日翻中" | "中翻日" | "讀音" | "填空";
   options?: string[];
+};
+
+type SentenceFeedback = {
+  status: "good" | "review";
+  title: string;
+  notes: string[];
+  suggestion: string;
 };
 
 const WORDS: Word[] = [
@@ -100,9 +123,54 @@ function questionFor(word: Word, index: number): QuizItem {
   };
 }
 
+function isQuizAnswerCorrect(question: QuizItem, value: string) {
+  const acceptedMeanings = question.word.meaning.split("、");
+  return normalize(value) === normalize(question.answer) ||
+    acceptedMeanings.some((meaning) => normalize(meaning) === normalize(value));
+}
+
+function reviewSentence(sentence: string, targetWord?: Word): SentenceFeedback {
+  const original = sentence.trim();
+  const notes: string[] = [];
+  let suggestion = original;
+
+  if (!/[ぁ-んァ-ヶ一-龠]/.test(original)) {
+    notes.push("句子裡還沒有日文，請用日文再試一次。");
+  }
+  if (targetWord && !original.includes(targetWord.kanji) && !original.includes(targetWord.kana)) {
+    notes.push(`這句還沒有使用指定單字「${targetWord.kanji}」。`);
+  }
+  if (/警察いる/.test(suggestion)) {
+    suggestion = suggestion.replace(/警察いる/g, "警察がいる");
+    notes.push("表示「有警察」時，「いる」前面要加助詞「が」。");
+  }
+  if (/先生がので/.test(suggestion)) {
+    suggestion = suggestion.replace(/先生がので/g, "先生がいるので");
+    notes.push("「因為有老師」要說「先生がいるので」，不能省略「いる」。");
+  }
+  if (/は安心です/.test(suggestion) && !/ので|から/.test(suggestion)) {
+    notes.push("「安心」通常描述人的感受；加上「〜ので安心です」會更自然。");
+  }
+  if (/箱は大切です/.test(suggestion)) {
+    notes.push("文法正確，但「大切」通常形容有情感價值的人或物，例如「この写真は大切です」。");
+  }
+  if (original && !/[。！？!?]$/.test(suggestion)) {
+    suggestion += "。";
+    notes.push("補上句號，讓句子更完整。");
+  }
+
+  const onlyPunctuation = notes.length === 1 && notes[0].startsWith("補上句號");
+  return {
+    status: notes.length === 0 || onlyPunctuation ? "good" : "review",
+    title: notes.length === 0 ? "很自然！" : onlyPunctuation ? "句子正確" : "建議再修改",
+    notes: notes.length ? notes : ["助詞、句型和用字目前看起來都很自然。"],
+    suggestion,
+  };
+}
+
 export default function Home() {
   const [data, setData] = useState<AppData | null>(null);
-  const [tab, setTab] = useState<"today" | "progress" | "mistakes">("today");
+  const [tab, setTab] = useState<"today" | "progress" | "vocabulary" | "mistakes">("today");
   const [step, setStep] = useState(0);
   const [checkIn, setCheckIn] = useState<RecordItem["checkIn"] | null>(null);
   const [quizIndex, setQuizIndex] = useState(0);
@@ -110,15 +178,56 @@ export default function Home() {
   const [answer, setAnswer] = useState("");
   const [sentences, setSentences] = useState(["", "", ""]);
   const [showHelp, setShowHelp] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [reviewingSentences, setReviewingSentences] = useState(false);
+  const [wordSearch, setWordSearch] = useState("");
+  const [quizFeedback, setQuizFeedback] = useState<QuizFeedback | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("kotoba-n4-data");
-    setData(saved ? JSON.parse(saved) : INITIAL_DATA);
+    const loadedData: AppData = saved ? JSON.parse(saved) : INITIAL_DATA;
+    const today = new Date().toISOString().slice(0, 10);
+    const completedToday = loadedData.records.find((item) => item.date === today && item.completed);
+    const savedDraft = window.localStorage.getItem("kotoba-n4-daily-draft");
+    const draft: DailyDraft | null = savedDraft ? JSON.parse(savedDraft) : null;
+
+    setData(loadedData);
+    if (completedToday) {
+      setCheckIn(completedToday.checkIn);
+      setSentences(completedToday.sentences.length ? completedToday.sentences : ["", "", ""]);
+      setStep(4);
+    } else if (draft?.date === today) {
+      setStep(draft.step);
+      setCheckIn(draft.checkIn);
+      setQuizIndex(draft.quizIndex);
+      setAnswers(draft.answers);
+      setSentences(draft.sentences);
+      setQuizFeedback(draft.quizFeedback ?? null);
+    }
+    setReady(true);
   }, []);
 
   useEffect(() => {
     if (data) window.localStorage.setItem("kotoba-n4-data", JSON.stringify(data));
   }, [data]);
+
+  useEffect(() => {
+    if (!ready || !data) return;
+    if (step === 4) {
+      window.localStorage.removeItem("kotoba-n4-daily-draft");
+      return;
+    }
+    const draft: DailyDraft = {
+      date: new Date().toISOString().slice(0, 10),
+      step,
+      checkIn,
+      quizIndex,
+      answers,
+      sentences,
+      quizFeedback,
+    };
+    window.localStorage.setItem("kotoba-n4-daily-draft", JSON.stringify(draft));
+  }, [ready, data, step, checkIn, quizIndex, answers, sentences, quizFeedback]);
 
   const isWeekly = data ? (data.records.length + 1) % 7 === 0 : false;
   const lastThree = data?.records.slice(-3) ?? [];
@@ -143,14 +252,24 @@ export default function Home() {
   if (!data) return <main className="loading">正在整理今天的學習內容…</main>;
 
   const correctCount = answers.reduce((count, item, index) => {
-    const accepted = quiz[index]?.word.meaning.split("、") ?? [];
-    return count + (normalize(item) === normalize(quiz[index]?.answer ?? "") || accepted.some((value) => normalize(value) === normalize(item)) ? 1 : 0);
+    const question = quiz[index];
+    return count + (question && isQuizAnswerCorrect(question, item) ? 1 : 0);
   }, 0);
 
   function submitAnswer(value = answer) {
-    if (!value.trim()) return;
+    if (!value.trim() || quizFeedback) return;
+    const question = quiz[quizIndex];
     setAnswers((items) => [...items, value]);
     setAnswer("");
+    setQuizFeedback({
+      correct: isQuizAnswerCorrect(question, value),
+      userAnswer: value,
+      correctAnswer: question.answer,
+    });
+  }
+
+  function continueQuiz() {
+    setQuizFeedback(null);
     if (quizIndex < quiz.length - 1) setQuizIndex((index) => index + 1);
     else setStep(isWeekly ? 3 : 2);
   }
@@ -183,6 +302,18 @@ export default function Home() {
   const accuracy = data.records.length ? Math.round((data.records.reduce((sum, record) => sum + record.score, 0) / data.records.reduce((sum, record) => sum + record.total, 0)) * 100) : 0;
   const streak = data.records.slice().reverse().findIndex((record) => !record.completed);
   const mistakeRows = Object.entries(data.mistakes).sort((a, b) => b[1] - a[1]);
+  const learnedWords = WORDS.filter((word) => data.learnedIds.includes(word.id));
+  const visibleLearnedWords = learnedWords.filter((word) => {
+    const query = wordSearch.trim().toLowerCase();
+    return !query || `${word.kanji}${word.kana}${word.meaning}`.toLowerCase().includes(query);
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  const completedToday = data.records.find((record) => record.date === today && record.completed);
+  const displayedScore = completedToday?.score ?? correctCount;
+  const displayedTotal = completedToday?.total ?? quiz.length;
+  const sentenceFeedback = sentences.map((sentence, index) =>
+    reviewSentence(sentence, isWeekly ? undefined : todayNewWords[index])
+  );
 
   return (
     <main>
@@ -197,6 +328,7 @@ export default function Home() {
       <nav className="tabs" aria-label="主要導覽">
         <button className={tab === "today" ? "active" : ""} onClick={() => setTab("today")}>今日學習</button>
         <button className={tab === "progress" ? "active" : ""} onClick={() => setTab("progress")}>學習進度</button>
+        <button className={tab === "vocabulary" ? "active" : ""} onClick={() => setTab("vocabulary")}>我的單字</button>
         <button className={tab === "mistakes" ? "active" : ""} onClick={() => setTab("mistakes")}>易錯詞</button>
       </nav>
 
@@ -242,16 +374,28 @@ export default function Home() {
               <div className="quiz-meta"><span>{quiz[quizIndex].kind}</span><strong>{quizIndex + 1} / {quiz.length}</strong></div>
               <div className="progress-track"><i style={{ width: `${((quizIndex + 1) / quiz.length) * 100}%` }} /></div>
               <h2>{quiz[quizIndex].prompt}</h2>
-              {quiz[quizIndex].options ? (
+              {!quizFeedback && quiz[quizIndex].options ? (
                 <div className="option-list">
                   {quiz[quizIndex].options!.map((option) => <button key={option} onClick={() => submitAnswer(option)}>{option}</button>)}
                 </div>
-              ) : (
+              ) : !quizFeedback ? (
                 <form onSubmit={(event) => { event.preventDefault(); submitAnswer(); }}>
                   <label htmlFor="answer">你的答案</label>
                   <input id="answer" autoFocus value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="輸入中文、漢字或假名" />
                   <button className="primary" type="submit">送出答案</button>
                 </form>
+              ) : null}
+              {quizFeedback && (
+                <div className={`quiz-feedback ${quizFeedback.correct ? "correct" : "incorrect"}`}>
+                  <div className="quiz-feedback-title">
+                    <span>{quizFeedback.correct ? "✓" : "✕"}</span>
+                    <strong>{quizFeedback.correct ? "答對了！" : "這題需要再記一次"}</strong>
+                  </div>
+                  {!quizFeedback.correct && <p>你的答案：<b>{quizFeedback.userAnswer}</b></p>}
+                  <p>正確答案：<b>{quizFeedback.correctAnswer}</b></p>
+                  <small>{quiz[quizIndex].word.kanji}（{quiz[quizIndex].word.kana}）— {quiz[quizIndex].word.meaning}</small>
+                  <button className="primary" onClick={continueQuiz}>{quizIndex < quiz.length - 1 ? "下一題 →" : "查看測驗結果 →"}</button>
+                </div>
               )}
               <button className="text-button" onClick={() => setShowHelp(!showHelp)}>⌨ 日文 9 鍵小提示</button>
               {showHelp && <div className="tip">小字：先打 ゆ／つ，再按「小」變成 ゅ／っ。濁音：先打 へ，再按 ゛變成 べ。</div>}
@@ -289,9 +433,36 @@ export default function Home() {
               <h2>{isWeekly ? "寫下這週最想記住的 3 句" : "用今天的詞，寫 3 句自己的日文"}</h2>
               <p className="muted">{isWeekly ? "可以使用本週任何單字。" : `建議使用：${todayNewWords.slice(0, 3).map((word) => `${word.kanji}（${word.kana}）`).join("、")}`}</p>
               {sentences.map((sentence, index) => (
-                <label className="sentence-input" key={index}><span>{index + 1}</span><input value={sentence} onChange={(event) => setSentences((items) => items.map((item, i) => i === index ? event.target.value : item))} placeholder="輸入一句日文…" /></label>
+                <label className="sentence-input" key={index}><span>{index + 1}</span><input value={sentence} onChange={(event) => {
+                  setSentences((items) => items.map((item, i) => i === index ? event.target.value : item));
+                  setReviewingSentences(false);
+                }} placeholder="輸入一句日文…" /></label>
               ))}
-              <button className="primary" disabled={sentences.some((item) => !item.trim())} onClick={finishDay}>完成今天的學習 ✓</button>
+              {!reviewingSentences && (
+                <button className="primary" disabled={sentences.some((item) => !item.trim())} onClick={() => setReviewingSentences(true)}>檢查並訂正 3 句 →</button>
+              )}
+              {reviewingSentences && (
+                <div className="correction-panel">
+                  <div className="correction-heading"><strong>造句訂正</strong><span>請先看看建議，再決定是否修改</span></div>
+                  {sentenceFeedback.map((feedback, index) => (
+                    <article className={`correction ${feedback.status}`} key={index}>
+                      <div className="correction-title"><span>{feedback.status === "good" ? "✓" : "!"}</span><strong>第 {index + 1} 句：{feedback.title}</strong></div>
+                      <p className="original-sentence">{sentences[index]}</p>
+                      {feedback.notes.map((note) => <small key={note}>{note}</small>)}
+                      {feedback.suggestion !== sentences[index].trim() && (
+                        <button type="button" onClick={() => setSentences((items) => items.map((item, i) => i === index ? feedback.suggestion : item))}>
+                          採用建議：{feedback.suggestion}
+                        </button>
+                      )}
+                    </article>
+                  ))}
+                  <p className="correction-note">這是 N4 常見句型的自動檢查；它會抓出常見助詞和句型問題，但無法取代老師對所有語境的判斷。</p>
+                  <div className="correction-actions">
+                    <button className="secondary" onClick={() => setReviewingSentences(false)}>返回修改</button>
+                    <button className="primary" onClick={finishDay}>確認並完成今天學習 ✓</button>
+                  </div>
+                </div>
+              )}
             </article>
           )}
 
@@ -299,8 +470,8 @@ export default function Home() {
             <article className="card complete-card">
               <span className="celebrate">よくできました！</span>
               <h2>今天完成了。</h2>
-              <div className="result-number"><strong>{correctCount}/{quiz.length}</strong><span>測驗成績</span></div>
-              <p>錯題已經加入易錯詞。明天會依這次表現，自動安排最適合的單字量。</p>
+              <div className="result-number"><strong>{displayedScore}/{displayedTotal}</strong><span>測驗成績</span></div>
+              <p>今天的紀錄已保存在這台裝置。再次開啟網站時，會直接回到這個完成畫面。</p>
               <button className="secondary" onClick={() => setTab("progress")}>查看我的進度</button>
             </article>
           )}
@@ -324,6 +495,29 @@ export default function Home() {
             </div>
           </article>
           <button className="danger-link" onClick={resetDemo}>重設這台裝置的示範資料</button>
+        </section>
+      )}
+
+      {tab === "vocabulary" && (
+        <section className="page">
+          <div className="section-heading">
+            <div><p className="eyebrow">MY VOCABULARY</p><h1>我學過的單字</h1><p className="muted">目前共 {learnedWords.length} 個。隨時回來遮住中文，測試自己還記不記得。</p></div>
+          </div>
+          <label className="word-search">
+            <span>搜尋單字</span>
+            <input value={wordSearch} onChange={(event) => setWordSearch(event.target.value)} placeholder="輸入漢字、假名或中文…" />
+          </label>
+          <div className="word-grid vocabulary-grid">
+            {visibleLearnedWords.map((word, index) => (
+              <article className="word-card" key={word.id}>
+                <span className="word-number">{String(index + 1).padStart(2, "0")}</span>
+                <h3>{word.kanji}</h3><p className="kana">{word.kana}</p>
+                <strong>{word.meaning}</strong>
+                <div className="example"><p>{word.example}</p><small>{word.translation}</small></div>
+              </article>
+            ))}
+          </div>
+          {!visibleLearnedWords.length && <div className="empty-state">找不到符合的單字，換個關鍵字試試看。</div>}
         </section>
       )}
 
